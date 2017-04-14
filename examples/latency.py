@@ -12,7 +12,7 @@ from xenalib.StatsCSV import write_csv
 logging.basicConfig(level=logging.INFO)
 
 
-def build_test_packet():
+def build_test_packet(stream):
     try:
         import scapy.layers.inet as inet
         import scapy.utils as utils
@@ -22,8 +22,8 @@ def build_test_packet():
     else:
         logging.info("Packet: Using scapy to build the test packet")
         L2 = inet.Ether(src="52:54:00:C6:10:10", dst="52:54:00:C6:10:20")
-        L3 = inet.IP(src="10.0.0.1", dst="10.0.0.2")
-        packet = L2/L3
+        L3 = inet.IP(src="10.0.0.{}".format(stream), dst="10.1.0.{}".format(stream))
+        packet = L2/L3/inet.UDP()
         packet_str = str(packet)
         packet_hex = '0x' + packet_str.encode('hex')
         # Uncomment below to see the packet in wireshark tool
@@ -32,16 +32,16 @@ def build_test_packet():
     logging.debug("Packet string: %s", packet_hex)
     return packet_hex
 
-def main():
+def run(packet_size):
     # create the test packet
-    pkthdr = build_test_packet()
+    pkthdr = build_test_packet(1)
     # create the communication socket
-    xsocket = XenaSocket('10.0.0.1')
+    xsocket = XenaSocket('10.19.17.64')
     if not xsocket.connect():
         sys.exit(-1)
 
     # create the manager session
-    xm = XenaManager(xsocket, 'fbl')
+    xm = XenaManager(xsocket, 'test')
 
     # add port 0 and configure
     port0 = xm.add_port(1, 0)
@@ -59,48 +59,70 @@ def main():
     port1.set_pause_frames_off()
 
     # add a single stream and configure
-    s1_p0 = port0.add_stream(1)
-    s1_p0.set_stream_on()
-    s1_p0.disable_packet_limit()
-    s1_p0.set_rate_fraction()
-    s1_p0.set_rate_pps(100)
-    s1_p0.set_packet_header(pkthdr)
-    s1_p0.set_packet_length_fixed(64, 1518)
-    s1_p0.set_packet_payload_incrementing('0x00')
-    s1_p0.set_test_payload_id(1)
-    s1_p0.set_frame_csum_on()
+    stream_no = 30
+    for i in range(0, stream_no):
+        s1_p0 = port0.add_stream(i)
+        s1_p0.set_stream_on()
+        s1_p0.disable_packet_limit()
+        s1_p0.set_rate_fraction()
+        s1_p0.set_rate_pps(100.0/stream_no)
+        s1_p0.set_packet_header(pkthdr)
+        s1_p0.set_packet_length_fixed(packet_size, 1518)
+        s1_p0.set_packet_payload_incrementing('0x00')
+        s1_p0.set_test_payload_id(i + 1)
+        s1_p0.set_frame_csum_on()
 
     # start the traffic
     port0.start_traffic()
     time.sleep(4)
 
     # fetch stats
-    for i in range(1,300):
+    for i in range(1,5):
         port1.grab_all_rx_stats()
         time.sleep(1)
 
     # stop traffic
     port0.stop_traffic()
 
-    # release resources
-    full_stats = port1.dump_all_rx_stats()
-    avg_lat = max_lat = min_lat = cnt = 0
-    for timestamp in full_stats.keys():
-        stats = full_stats[timestamp]
-        lat = stats['pr_tpldlatency']['1']['avg']
-        max_tmp = stats['pr_tpldlatency']['1']['max']
-        min_tmp = stats['pr_tpldlatency']['1']['min']
-        max_lat = max_tmp if max_tmp > max_lat else max_lat
-        min_lat = min_tmp if min_tmp < min_lat else min_lat
-        avg_lat += lat
-        cnt += 1
 
-    print "Average latency: %.2f ns" % (avg_lat / cnt)
-    print "Max latency: %.2f ns" % (max_lat)
-    print "Min latency: %.2f ns" % (min_lat)
+    # release resources
+    print "Packet size = {}".format(packet_size)
+    print "TID  Min latency      Average latency  Max latency"
+    print "---  ---------------  ---------------  ---------------"
+
+    full_stats = port1.dump_all_rx_stats()
+    avg_tot_lat = max_tot_lat = min_tot_lat = 0
+
+
+    for i in range(0, stream_no): 
+        avg_lat = max_lat = min_lat = cnt = 0
+        for timestamp in full_stats.keys():
+            stats = full_stats[timestamp]
+            lat = stats['pr_tpldlatency']['{}'.format(i +1)]['avg']
+            max_tmp = stats['pr_tpldlatency']['{}'.format(i + 1)]['max']
+            min_tmp = stats['pr_tpldlatency']['{}'.format(i + 1)]['min']
+            max_lat = max_tmp if max_tmp > max_lat else max_lat
+            min_lat = min_tmp if min_tmp < min_lat else min_lat
+            avg_lat += lat
+            cnt += 1
+    
+        avg_tot_lat += avg_lat
+        max_tot_lat = max_lat if max_tot_lat < max_lat else max_tot_lat
+        min_tot_lat = min_lat if min_tot_lat > min_lat else min_tot_lat
+        print "{:3}  {:15,}  {:15,}  {:15,}".format(i + 1 , min_lat, avg_lat / cnt, max_lat)
+
+    print "Tot. {:15,}  {:15,}  {:15,}\n".format(min_tot_lat, 
+                                                 avg_tot_lat / (stream_no * cnt), 
+                                                 max_tot_lat)
+
     write_csv("latency.csv", "Latency RX Stats", full_stats)
     del xm
     del xsocket
+
+
+def main():
+    for pkt in [512, 1024, 1280, 1518]:
+        run(pkt)
 
 if __name__ == '__main__':
     main()
