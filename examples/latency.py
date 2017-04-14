@@ -77,7 +77,7 @@ def run(packet_size):
     time.sleep(4)
 
     # fetch stats
-    for i in range(1,5):
+    for i in range(1,60):
         port1.grab_all_rx_stats()
         time.sleep(1)
 
