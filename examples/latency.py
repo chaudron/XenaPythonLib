@@ -102,13 +102,13 @@ def run(packet_size):
             max_tmp = stats['pr_tpldlatency']['{}'.format(i + 1)]['max']
             min_tmp = stats['pr_tpldlatency']['{}'.format(i + 1)]['min']
             max_lat = max_tmp if max_tmp > max_lat else max_lat
-            min_lat = min_tmp if min_tmp < min_lat else min_lat
+            min_lat = min_tmp if min_tmp < min_lat or min_lat == 0 else min_lat
             avg_lat += lat
             cnt += 1
     
         avg_tot_lat += avg_lat
         max_tot_lat = max_lat if max_tot_lat < max_lat else max_tot_lat
-        min_tot_lat = min_lat if min_tot_lat > min_lat else min_tot_lat
+        min_tot_lat = min_lat if min_tot_lat > min_lat or min_tot_lat == 0 else min_tot_lat
         print "{:3}  {:15,}  {:15,}  {:15,}".format(i + 1 , min_lat, avg_lat / cnt, max_lat)
 
     print "Tot. {:15,}  {:15,}  {:15,}\n".format(min_tot_lat, 
