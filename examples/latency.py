@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+FLOWS     = 30
+RUN_TIME  = 60
+LINK_UTIL = 95
+
 import sys
 import time
 import logging
@@ -59,12 +63,12 @@ def run(packet_size):
     port1.set_pause_frames_off()
 
     # add a single stream and configure
-    stream_no = 30
+    stream_no = FLOWS
     for i in range(0, stream_no):
         s1_p0 = port0.add_stream(i)
         s1_p0.set_stream_on()
         s1_p0.disable_packet_limit()
-        s1_p0.set_rate_fraction(1000000/stream_no)
+        s1_p0.set_rate_fraction((LINK_UTIL * 10000)/stream_no)
 #        s1_p0.set_rate_pps(100.0/stream_no)
         s1_p0.set_packet_header(pkthdr)
         s1_p0.set_packet_length_fixed(packet_size, 1518)
@@ -77,7 +81,7 @@ def run(packet_size):
     time.sleep(4)
 
     # fetch stats
-    for i in range(1,60):
+    for i in range(1, RUN_TIME):
         port1.grab_all_rx_stats()
         time.sleep(1)
 
@@ -94,7 +98,7 @@ def run(packet_size):
     avg_tot_lat = max_tot_lat = min_tot_lat = 0
 
 
-    for i in range(0, stream_no): 
+    for i in range(0, stream_no):
         avg_lat = max_lat = min_lat = cnt = 0
         for timestamp in full_stats.keys():
             stats = full_stats[timestamp]
@@ -105,24 +109,38 @@ def run(packet_size):
             min_lat = min_tmp if min_tmp < min_lat or min_lat == 0 else min_lat
             avg_lat += lat
             cnt += 1
-    
-        avg_tot_lat += avg_lat
+ 
+        avg_tot_lat += avg_lat / cnt
         max_tot_lat = max_lat if max_tot_lat < max_lat else max_tot_lat
         min_tot_lat = min_lat if min_tot_lat > min_lat or min_tot_lat == 0 else min_tot_lat
         print "{:3}  {:15,}  {:15,}  {:15,}".format(i + 1 , min_lat, avg_lat / cnt, max_lat)
 
-    print "Tot. {:15,}  {:15,}  {:15,}\n".format(min_tot_lat, 
-                                                 avg_tot_lat / (stream_no * cnt), 
+    print "Tot. {:15,}  {:15,}  {:15,}\n".format(min_tot_lat,
+                                                 avg_tot_lat / stream_no,
                                                  max_tot_lat)
 
     write_csv("latency.csv", "Latency RX Stats", full_stats)
     del xm
     del xsocket
 
+    return min_tot_lat, avg_tot_lat / stream_no, max_tot_lat
+
 
 def main():
+    results = dict()
     for pkt in [512, 1024, 1280, 1518]:
-        run(pkt)
+        results[pkt] = run(pkt)
+
+    print "Summary: (flows = {}, line util = {}, runtime = {}". \
+        format(FLOWS, RUNTIME, LINK_UTIL)
+    print "  Pkt size     min(ns)     avg(ns)     max(ns)"
+    print "  --------  ----------  ----------  ----------"
+    for pkt in [512, 1024, 1280, 1518]:
+          print "  {:8d}  {:10,d}  {:10,d}  {:10,d}". \
+              format(pkt, results[pkt][0],
+                     results[pkt][1],
+                     results[pkt][2])
+
 
 if __name__ == '__main__':
     main()
